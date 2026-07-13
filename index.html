@@ -19,14 +19,47 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://h3manth.com/ai/lipi/og.jpg">
 
+  <!-- LLM / Agent discoverability -->
+  <link rel="llms" href="/ai/lipi/llms.txt" type="text/plain">
+
+  <!-- Schema.org structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "ಲಿಪಿ (Lipi)",
+    "alternateName": "Lipi Kannada Voice Editor",
+    "url": "https://h3manth.com/ai/lipi/",
+    "description": "Real-time Kannada speech-to-text editor. Speak Kannada and watch words stream live. Type English to get Kannada. Polish with Whisper AI.",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Web",
+    "browserRequirements": "Chrome 80+, Edge 80+",
+    "inLanguage": ["kn", "en"],
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "Hemanth HM", "url": "https://h3manth.com" },
+    "featureList": [
+      "Real-time Kannada speech streaming",
+      "Phonetic English-to-Kannada transliteration",
+      "Whisper AI polish for improved accuracy",
+      "Full text editor with auto-save",
+      "Audio file upload and transcription"
+    ]
+  }
+  </script>
+
+  <!-- Non-render-blocking fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
+
   <link rel="stylesheet" href="index.css">
   <script>if(location.hash==='#editor')document.documentElement.classList.add('direct-editor')</script>
   <style>.direct-editor #landing{display:none}.direct-editor #editor-view{display:flex!important}</style>
 </head>
 <body>
+
+  <main>
 
   <!-- ═══════ LANDING ═══════ -->
   <section class="landing" id="landing">
@@ -80,7 +113,7 @@
       </div>
     </section>
 
-    <section class="preview">
+    <section class="preview" aria-label="Preview">
       <span class="preview-label">The editor</span>
       <div class="preview-window">
         <div class="preview-chrome">
@@ -106,54 +139,52 @@
 
   <!-- ═══════ EDITOR ═══════ -->
   <section class="editor-view" id="editor-view" hidden>
-    <!-- Back button -->
     <button class="back-btn" id="back-btn" title="Back to home">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
       Back
     </button>
 
-    <!-- Fullscreen editor -->
     <div class="editor" id="editor" contenteditable="true" spellcheck="false"
          role="textbox" aria-multiline="true" aria-label="Kannada text editor"></div>
 
-    <!-- Floating controls -->
-    <div class="float-bar" id="float-bar">
+    <div class="float-bar" id="float-bar" role="toolbar" aria-label="Editor tools">
       <button class="mic" id="mic" aria-label="Record">
         <span class="mic-dot"></span>
       </button>
       <span class="mic-label" id="mic-label"></span>
 
-      <span class="sep"></span>
+      <span class="sep" role="separator"></span>
 
       <button class="polish-btn" id="polish-btn" hidden title="Re-transcribe with Whisper for better accuracy">Polish</button>
 
       <button class="fbtn kn-toggle is-active" id="kn-toggle" aria-pressed="true" title="Kannada typing">ಕ</button>
-      <button class="fbtn" id="upload-btn" title="Upload audio">
+      <button class="fbtn" id="upload-btn" title="Upload audio" aria-label="Upload audio file">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
       </button>
-      <button class="fbtn" id="copy-btn" title="Copy all">
+      <button class="fbtn" id="copy-btn" title="Copy all" aria-label="Copy text">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </button>
-      <button class="fbtn" id="save-btn" title="Save .txt">
+      <button class="fbtn" id="save-btn" title="Save .txt" aria-label="Save as text file">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
       </button>
-      <button class="fbtn" id="clear-btn" title="Clear">
+      <button class="fbtn" id="clear-btn" title="Clear" aria-label="Clear editor">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
       </button>
 
-      <span class="sep"></span>
+      <span class="sep" role="separator"></span>
 
-      <select class="model-sel" id="model-select" aria-label="Model"></select>
+      <select class="model-sel" id="model-select" aria-label="Whisper model"></select>
     </div>
 
-    <!-- Progress -->
-    <div class="progress" id="progress" hidden>
+    <div class="progress" id="progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100">
       <div class="progress-fill" id="progress-fill"></div>
     </div>
 
     <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.webm,.ogg,.m4a,.flac" hidden>
     <div class="toast-box" id="toast-container" aria-live="polite"></div>
   </section>
+
+  </main>
 
   <script type="module" src="app.js"></script>
 </body>
