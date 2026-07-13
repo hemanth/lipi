@@ -74,7 +74,7 @@ function closeEditor() {
 // ═══════════════════════════════════
 //  Web Speech API — real-time streaming
 // ═══════════════════════════════════
-function initSpeech() {
+async function initSpeech() {
   const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechAPI) {
     toast('Speech API not available. Use Chrome or Edge.', 'error');
@@ -86,6 +86,26 @@ function initSpeech() {
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
+
+  // Try on-device recognition if supported (no cloud, works offline)
+  if ('processLocally' in recognition) {
+    try {
+      const availability = await SpeechAPI.available({ langs: ['kn-IN'], processLocally: true });
+      if (availability === 'available') {
+        recognition.processLocally = true;
+        console.log('[Lipi] On-device Kannada recognition available');
+      } else if (availability === 'downloadable') {
+        toast('Downloading on-device Kannada model…', 'info');
+        await SpeechAPI.install({ langs: ['kn-IN'], processLocally: true });
+        recognition.processLocally = true;
+        console.log('[Lipi] On-device Kannada model installed');
+      } else {
+        console.log('[Lipi] On-device not available for Kannada, using cloud');
+      }
+    } catch (e) {
+      console.log('[Lipi] On-device check failed, using cloud:', e.message);
+    }
+  }
 
   recognition.onresult = (event) => {
     const ed = $('#editor');
@@ -201,7 +221,7 @@ async function startRec() {
   }
 
   // Init speech recognition if available
-  if (hasSpeechAPI && !recognition && !initSpeech()) {
+  if (hasSpeechAPI && !recognition && !(await initSpeech())) {
     // Speech init failed, try Whisper fallback
     if (!state.modelReady) {
       toast('Downloading Whisper model…', 'info');
