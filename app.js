@@ -54,6 +54,13 @@ function openEditor() {
   $('#editor-view').hidden = false;
   $('#editor')?.focus();
   history.replaceState(null, '', '#editor');
+
+  // Preload Whisper model in the background
+  if (!state.modelReady) {
+    const preload = () => worker.postMessage({ action: 'load-model', modelId: state.modelId });
+    if ('requestIdleCallback' in window) requestIdleCallback(preload, { timeout: 3000 });
+    else setTimeout(preload, 1000);
+  }
 }
 
 function closeEditor() {
