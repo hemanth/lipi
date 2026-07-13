@@ -327,6 +327,16 @@ function showPolishBtn(show) {
   }
 }
 
+function lockEditor() {
+  const ed = $('#editor');
+  if (ed) { ed.contentEditable = 'false'; ed.classList.add('is-polishing'); }
+}
+
+function unlockEditor() {
+  const ed = $('#editor');
+  if (ed) { ed.contentEditable = 'true'; ed.classList.remove('is-polishing'); }
+}
+
 function startPolish() {
   if (!lastSessionPCM) {
     toast('Nothing to polish — record first.', 'error');
@@ -334,7 +344,8 @@ function startPolish() {
   }
 
   const btn = $('#polish-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Polishing…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Polishing…'; }
+  lockEditor();
 
   if (!state.modelReady) {
     state._polishPending = true;
@@ -348,7 +359,8 @@ function startPolish() {
 
 function doPolish() {
   const btn = $('#polish-btn');
-  if (btn) { btn.textContent = '⏳ Polishing…'; }
+  if (btn) { btn.textContent = 'Polishing…'; }
+  lockEditor();
 
   // Remove session text from the editor (everything after the session mark)
   const ed = $('#editor');
@@ -400,6 +412,7 @@ function onWhisperChunk(text, isFinal) {
     ed.querySelectorAll('.polished').forEach(s => s.replaceWith(document.createTextNode(s.textContent)));
     const btn = $('#polish-btn');
     if (btn) { btn.textContent = 'Polish'; btn.hidden = true; }
+    unlockEditor();
     saveDoc();
     sessionStartMark = null;
   }

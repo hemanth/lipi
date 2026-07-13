@@ -168,6 +168,21 @@ body {
 /* Session marker (invisible) */
 .session-mark { font-size: 0; line-height: 0; }
 
+/* Polishing state — editor locked */
+.editor.is-polishing {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.editor.is-polishing::after {
+  content: "Polishing with Whisper…";
+  position: fixed; bottom: 4rem; left: 50%; transform: translateX(-50%);
+  font-family: var(--fontui); font-size: 0.8125rem; font-weight: 500;
+  color: var(--accent); background: var(--surface);
+  padding: 0.5rem 1.25rem; border-radius: 999px;
+  border: 1px solid oklch(0.72 0.17 55 / 0.2);
+  pointer-events: none;
+}
+
 /* Transliteration buffer */
 .kn-buffer {
   color: var(--ink2); font-family: var(--fontui); font-size: 0.8em;
