@@ -170,15 +170,38 @@ function ensureModel(cb) {
 }
 
 // ═══════════════════════════════════
-//  RECORD — Web Speech + raw PCM capture in parallel
+//  RECORD — auto-detects Speech API vs Whisper fallback
+//
+//  Speech API available (Chrome/Edge/Safari):
+//    → Web Speech streams text live + PCM captured for polish
+//  No Speech API (Firefox, etc.):
+//    → Whisper processes 5s audio chunks while recording
 // ═══════════════════════════════════
+
+const hasSpeechAPI = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+let chunkTimer = null;
+
 async function toggleRec() {
   state.isRecording ? stopRec() : await startRec();
 }
 
 async function startRec() {
-  // Init speech recognition
-  if (!recognition && !initSpeech()) return;
+  // For Whisper fallback, ensure model is loaded first
+  if (!hasSpeechAPI && !state.modelReady) {
+    toast('Downloading Whisper model for speech…', 'info');
+    ensureModel(() => startRec());
+    return;
+  }
+
+  // Init speech recognition if available
+  if (hasSpeechAPI && !recognition && !initSpeech()) {
+    // Speech init failed, try Whisper fallback
+    if (!state.modelReady) {
+      toast('Downloading Whisper model…', 'info');
+      ensureModel(() => startRec());
+      return;
+    }
+  }
 
   try {
     // Get mic stream
@@ -189,10 +212,12 @@ async function startRec() {
       audio: { sampleRate: SR, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
 
-    // Start Web Speech API for streaming text
-    recognition.start();
+    // Start Web Speech API if available
+    if (recognition) {
+      try { recognition.start(); } catch {}
+    }
 
-    // Start raw PCM capture for polish later
+    // Start raw PCM capture (for polish, or for Whisper fallback)
     audioSrc = audioCtx.createMediaStreamSource(mediaStream);
     scriptProc = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmChunks = [];
@@ -216,12 +241,20 @@ async function startRec() {
     state.isRecording = true;
     setPhase('recording');
 
+    // Whisper fallback: send chunks every 5s while recording
+    if (!recognition) {
+      chunkTimer = setInterval(() => flushChunk(false), 5000);
+    }
+
   } catch (err) {
     toast('Microphone access denied.', 'error');
   }
 }
 
 function stopRec() {
+  // Stop chunk timer (Whisper fallback)
+  if (chunkTimer) { clearInterval(chunkTimer); chunkTimer = null; }
+
   // Stop speech recognition
   if (recognition) { try { recognition.stop(); } catch {} }
 
@@ -232,6 +265,11 @@ function stopRec() {
 
   // Commit interim text
   removeInterim();
+
+  // Whisper fallback: flush remaining audio
+  if (!recognition) {
+    flushChunk(true);
+  }
 
   // Merge and save PCM for polish
   if (pcmChunks.length > 0) {
@@ -248,6 +286,34 @@ function stopRec() {
   state.isRecording = false;
   setPhase('ready');
   saveDoc();
+}
+
+// ─── Whisper fallback: send accumulated audio chunk to worker ───
+let _chunkN = 0;
+
+function flushChunk(isFinal) {
+  if (pcmChunks.length === 0) return;
+
+  // Merge accumulated samples
+  const totalLen = pcmChunks.reduce((s, a) => s + a.length, 0);
+  const merged = new Float32Array(totalLen);
+  let off = 0;
+  for (const c of pcmChunks) { merged.set(c, off); off += c.length; }
+
+  // Don't clear pcmChunks here — stopRec needs them for polish
+  // Instead, copy and track what's been sent
+  if (!isFinal) {
+    pcmChunks = []; // reset for next interval (polish will use lastSessionPCM anyway)
+  }
+
+  // Skip silence
+  const rms = Math.sqrt(merged.reduce((s, v) => s + v * v, 0) / merged.length);
+  if (rms < 0.005) return;
+
+  worker.postMessage(
+    { action: 'transcribe-chunk', audioData: merged, chunkId: ++_chunkN, isFinal },
+    [merged.buffer]
+  );
 }
 
 // ═══════════════════════════════════
@@ -367,26 +433,25 @@ let _progRAF = null;
 let _lastPct = -1;
 
 function showProg(pct, file) {
-  // Skip if percentage hasn't changed
   if (pct === _lastPct) return;
   _lastPct = pct;
 
-  // Throttle DOM updates via rAF
   if (_progRAF) return;
   _progRAF = requestAnimationFrame(() => {
     _progRAF = null;
     const bar = $('#progress'), fill = $('#progress-fill'), lbl = $('#mic-label');
     if (bar) bar.hidden = false;
-    if (fill) fill.style.width = _lastPct + '%';
-    if (lbl) lbl.textContent = 'Downloading… ' + _lastPct + '%';
+    if (fill) fill.style.transform = 'scaleX(' + (_lastPct / 100) + ')';
+    if (lbl) lbl.textContent = 'Downloading\u2026 ' + _lastPct + '%';
   });
 }
 
 function hideProg() {
   _lastPct = -1;
   if (_progRAF) { cancelAnimationFrame(_progRAF); _progRAF = null; }
-  const bar = $('#progress'), lbl = $('#mic-label');
+  const bar = $('#progress'), fill = $('#progress-fill'), lbl = $('#mic-label');
   if (bar) bar.hidden = true;
+  if (fill) fill.style.transform = 'scaleX(0)';
   if (lbl) lbl.textContent = '';
 }
 
