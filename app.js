@@ -1,0 +1,548 @@
+/**
+ * ಕನ್ನಡ Voice Editor — app.js
+ *
+ * LIVE:   Web Speech API streams text word-by-word as user speaks
+ * RECORD: ScriptProcessorNode silently captures raw PCM in parallel
+ * POLISH: User clicks ✨ Polish → Whisper re-transcribes the raw audio for accuracy
+ * FILE:   Uploaded audio goes straight to Whisper
+ */
+
+import { transliterate } from './transliterate.js';
+
+const MODELS = [
+  { id: 'astronova001/whisper-small-kannada-ONNX', name: 'Whisper Small · Kannada', size: '~244 MB' },
+  { id: 'astronova001/whisper-kannada-tiny-ONNX',  name: 'Whisper Tiny · Kannada',  size: '~75 MB'  },
+  { id: 'onnx-community/whisper-small',            name: 'Whisper Small · Multi',   size: '~244 MB' },
+  { id: 'onnx-community/whisper-tiny',             name: 'Whisper Tiny · Multi',    size: '~75 MB'  },
+];
+
+const CHUNK_SEC = 10;
+const SR = 16000;
+
+const state = {
+  phase: 'idle',
+  modelId: MODELS[0].id,
+  modelReady: false,
+  isRecording: false,
+  kannadaMode: true,
+};
+
+let worker, audioCtx, mediaStream, scriptProc, audioSrc;
+let recognition = null;
+let interimSpan = null;
+let pcmChunks = [];          // raw audio saved for polish
+let lastSessionPCM = null;   // merged PCM from last recording session
+let sessionStartMark = null; // DOM marker for where this session's text begins
+
+const $ = s => document.querySelector(s);
+
+// ─── Boot ───
+document.addEventListener('DOMContentLoaded', () => {
+  populateModels();
+  initWorker();
+  bind();
+  loadDoc();
+  setPhase('ready');
+
+  // Check hash for direct link to editor
+  if (location.hash === '#editor') openEditor();
+});
+
+// ─── View switching ───
+function openEditor() {
+  $('#landing').hidden = true;
+  $('#editor-view').hidden = false;
+  $('#editor')?.focus();
+  history.replaceState(null, '', '#editor');
+}
+
+function closeEditor() {
+  // Stop recording if active
+  if (state.isRecording) stopRec();
+  $('#editor-view').hidden = true;
+  $('#landing').hidden = false;
+  history.replaceState(null, '', location.pathname);
+}
+
+// ═══════════════════════════════════
+//  Web Speech API — real-time streaming
+// ═══════════════════════════════════
+function initSpeech() {
+  const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechAPI) {
+    toast('Speech API not available. Use Chrome or Edge.', 'error');
+    return false;
+  }
+
+  recognition = new SpeechAPI();
+  recognition.lang = 'kn-IN';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (event) => {
+    const ed = $('#editor');
+    if (!ed) return;
+
+    let interim = '', final = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += t;
+      else interim += t;
+    }
+
+    // Commit final text
+    if (final) {
+      removeInterim();
+      const trimmed = final.trim();
+      if (trimmed) {
+        if (ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
+        ed.appendChild(document.createTextNode(trimmed));
+        ed.scrollTop = ed.scrollHeight;
+        saveDoc();
+      }
+    }
+
+    // Show interim (partial, still changing)
+    if (interim) {
+      if (!interimSpan) {
+        interimSpan = document.createElement('span');
+        interimSpan.className = 'interim';
+        if (ed.textContent.trim() && !final) ed.appendChild(document.createTextNode(' '));
+        ed.appendChild(interimSpan);
+      }
+      interimSpan.textContent = interim;
+      ed.scrollTop = ed.scrollHeight;
+    }
+  };
+
+  recognition.onerror = (event) => {
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
+    console.warn('Speech error:', event.error);
+  };
+
+  recognition.onend = () => {
+    if (state.isRecording) {
+      try { recognition.start(); } catch {}
+    }
+  };
+
+  return true;
+}
+
+function removeInterim() {
+  if (interimSpan && interimSpan.parentNode) {
+    interimSpan.remove();
+    interimSpan = null;
+  }
+}
+
+// ═══════════════════════════════════
+//  Whisper Worker — for polish + file upload
+// ═══════════════════════════════════
+function initWorker() {
+  worker = new Worker('./worker.js', { type: 'module' });
+  worker.onmessage = ({ data: m }) => {
+    switch (m.type) {
+      case 'model-loading': showProg(0, 'Downloading Whisper…'); break;
+      case 'model-progress':
+        if (m.status === 'progress' && m.total)
+          showProg(Math.round(m.loaded / m.total * 100), m.file);
+        break;
+      case 'model-ready':
+        hideProg();
+        state.modelReady = true;
+        // If polish was waiting for model, trigger it now
+        if (state._polishPending) { state._polishPending = false; doPolish(); }
+        if (state._filePending) { state._filePending(); state._filePending = null; }
+        break;
+      case 'model-error': hideProg(); toast('Model error: ' + m.error, 'error'); break;
+      case 'transcription-chunk': onWhisperChunk(m.text, m.isFinal); break;
+      case 'transcription-error': toast('Whisper error: ' + m.error, 'error'); setPhase('ready'); break;
+    }
+  };
+}
+
+function ensureModel(cb) {
+  if (state.modelReady) { cb(); return; }
+  state._filePending = cb;
+  worker.postMessage({ action: 'load-model', modelId: state.modelId });
+}
+
+// ═══════════════════════════════════
+//  RECORD — Web Speech + raw PCM capture in parallel
+// ═══════════════════════════════════
+async function toggleRec() {
+  state.isRecording ? stopRec() : await startRec();
+}
+
+async function startRec() {
+  // Init speech recognition
+  if (!recognition && !initSpeech()) return;
+
+  try {
+    // Get mic stream
+    if (!audioCtx || audioCtx.state === 'closed') audioCtx = new AudioContext({ sampleRate: SR });
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: SR, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+
+    // Start Web Speech API for streaming text
+    recognition.start();
+
+    // Start raw PCM capture for polish later
+    audioSrc = audioCtx.createMediaStreamSource(mediaStream);
+    scriptProc = audioCtx.createScriptProcessor(4096, 1, 1);
+    pcmChunks = [];
+
+    scriptProc.onaudioprocess = (e) => {
+      pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    audioSrc.connect(scriptProc);
+    scriptProc.connect(audioCtx.destination);
+
+    // Mark where this session's text starts in the editor
+    const ed = $('#editor');
+    if (ed) {
+      sessionStartMark = document.createElement('span');
+      sessionStartMark.className = 'session-mark';
+      sessionStartMark.id = 'session-mark';
+      ed.appendChild(sessionStartMark);
+    }
+
+    state.isRecording = true;
+    setPhase('recording');
+
+  } catch (err) {
+    toast('Microphone access denied.', 'error');
+  }
+}
+
+function stopRec() {
+  // Stop speech recognition
+  if (recognition) { try { recognition.stop(); } catch {} }
+
+  // Stop PCM capture
+  if (scriptProc) { scriptProc.disconnect(); scriptProc.onaudioprocess = null; scriptProc = null; }
+  if (audioSrc) { audioSrc.disconnect(); audioSrc = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+
+  // Commit interim text
+  removeInterim();
+
+  // Merge and save PCM for polish
+  if (pcmChunks.length > 0) {
+    const totalLen = pcmChunks.reduce((s, a) => s + a.length, 0);
+    lastSessionPCM = new Float32Array(totalLen);
+    let off = 0;
+    for (const c of pcmChunks) { lastSessionPCM.set(c, off); off += c.length; }
+    pcmChunks = [];
+
+    // Show polish button
+    showPolishBtn(true);
+  }
+
+  state.isRecording = false;
+  setPhase('ready');
+  saveDoc();
+}
+
+// ═══════════════════════════════════
+//  POLISH — re-transcribe with Whisper
+// ═══════════════════════════════════
+function showPolishBtn(show) {
+  const btn = $('#polish-btn');
+  if (btn) {
+    btn.hidden = !show;
+    btn.disabled = false;
+  }
+}
+
+function startPolish() {
+  if (!lastSessionPCM) {
+    toast('Nothing to polish — record first.', 'error');
+    return;
+  }
+
+  const btn = $('#polish-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Polishing…'; }
+
+  if (!state.modelReady) {
+    state._polishPending = true;
+    toast('Downloading Whisper model…', 'info');
+    worker.postMessage({ action: 'load-model', modelId: state.modelId });
+    return;
+  }
+
+  doPolish();
+}
+
+function doPolish() {
+  const btn = $('#polish-btn');
+  if (btn) { btn.textContent = '⏳ Polishing…'; }
+
+  // Remove session text from the editor (everything after the session mark)
+  const ed = $('#editor');
+  const mark = ed?.querySelector('#session-mark');
+  if (mark) {
+    // Remove everything after the mark
+    while (mark.nextSibling) {
+      mark.nextSibling.remove();
+    }
+    mark.remove();
+  }
+
+  // Send audio to Whisper in chunks
+  const chunkSamples = CHUNK_SEC * SR;
+  const totalChunks = Math.ceil(lastSessionPCM.length / chunkSamples);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSamples;
+    const end = Math.min(start + chunkSamples, lastSessionPCM.length);
+    const chunk = lastSessionPCM.slice(start, end);
+
+    worker.postMessage(
+      { action: 'transcribe-chunk', audioData: chunk, chunkId: i + 1, isFinal: i === totalChunks - 1 },
+      [chunk.buffer]
+    );
+  }
+
+  lastSessionPCM = null; // consumed
+}
+
+let polishMode = false;
+
+function onWhisperChunk(text, isFinal) {
+  const ed = $('#editor');
+  if (!ed) return;
+  const t = (text || '').trim();
+
+  if (t) {
+    if (ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
+    const span = document.createElement('span');
+    span.className = 'polished';
+    span.textContent = t;
+    ed.appendChild(span);
+    setTimeout(() => span.classList.add('settled'), 1200);
+    ed.scrollTop = ed.scrollHeight;
+  }
+
+  if (isFinal) {
+    ed.querySelectorAll('.polished').forEach(s => s.replaceWith(document.createTextNode(s.textContent)));
+    const btn = $('#polish-btn');
+    if (btn) { btn.textContent = 'Polish'; btn.hidden = true; }
+    saveDoc();
+    sessionStartMark = null;
+  }
+}
+
+// ─── Phase ───
+function setPhase(p) {
+  state.phase = p;
+  const mic = $('#mic'), lbl = $('#mic-label'), up = $('#upload-btn');
+
+  if (mic) {
+    mic.disabled = !['ready', 'recording'].includes(p);
+    mic.classList.toggle('is-recording', state.isRecording);
+  }
+
+  if (lbl) {
+    lbl.dataset.phase = p;
+    lbl.textContent = {
+      idle: '',
+      ready: '',
+      recording: '● Streaming…',
+      processing: 'Processing file…',
+    }[p] || '';
+  }
+
+  if (up) up.disabled = !['ready'].includes(p);
+}
+
+// ─── Progress ───
+let _progRAF = null;
+let _lastPct = -1;
+
+function showProg(pct, file) {
+  // Skip if percentage hasn't changed
+  if (pct === _lastPct) return;
+  _lastPct = pct;
+
+  // Throttle DOM updates via rAF
+  if (_progRAF) return;
+  _progRAF = requestAnimationFrame(() => {
+    _progRAF = null;
+    const bar = $('#progress'), fill = $('#progress-fill'), lbl = $('#mic-label');
+    if (bar) bar.hidden = false;
+    if (fill) fill.style.width = _lastPct + '%';
+    if (lbl) lbl.textContent = 'Downloading… ' + _lastPct + '%';
+  });
+}
+
+function hideProg() {
+  _lastPct = -1;
+  if (_progRAF) { cancelAnimationFrame(_progRAF); _progRAF = null; }
+  const bar = $('#progress'), lbl = $('#mic-label');
+  if (bar) bar.hidden = true;
+  if (lbl) lbl.textContent = '';
+}
+
+function populateModels() {
+  const s = $('#model-select'); if (!s) return;
+  s.innerHTML = MODELS.map(m => `<option value="${m.id}">${m.name} (${m.size})</option>`).join('');
+  s.value = state.modelId;
+}
+
+// ─── File upload ───
+async function processFile(file) {
+  if (!file.type.startsWith('audio/') && !file.name.match(/\.(wav|mp3|webm|ogg|m4a|flac)$/i))
+    return toast('Upload an audio file.', 'error');
+
+  ensureModel(async () => {
+    setPhase('processing');
+    try {
+      if (!audioCtx || audioCtx.state === 'closed') audioCtx = new AudioContext({ sampleRate: SR });
+      const buf = await audioCtx.decodeAudioData(await file.arrayBuffer());
+      let data = buf.getChannelData(0);
+      if (buf.sampleRate !== SR) data = resample(data, buf.sampleRate, SR);
+
+      const chunkSz = CHUNK_SEC * SR, total = Math.ceil(data.length / chunkSz);
+      for (let i = 0; i < total; i++) {
+        const chunk = data.slice(i * chunkSz, Math.min((i + 1) * chunkSz, data.length));
+        worker.postMessage(
+          { action: 'transcribe-chunk', audioData: chunk, chunkId: i + 1, isFinal: i === total - 1 },
+          [chunk.buffer]
+        );
+      }
+    } catch (e) { setPhase('ready'); toast('Audio error: ' + e.message, 'error'); }
+  });
+}
+
+function resample(data, from, to) {
+  const r = from / to, n = Math.round(data.length / r), out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = i * r, lo = Math.floor(s), hi = Math.min(lo + 1, data.length - 1), f = s - lo;
+    out[i] = data[lo] * (1 - f) + data[hi] * f;
+  }
+  return out;
+}
+
+// ─── Events ───
+function bind() {
+  // View switching
+  $('#hero-open-editor')?.addEventListener('click', openEditor);
+  $('#back-btn')?.addEventListener('click', closeEditor);
+
+  $('#model-select')?.addEventListener('change', e => { state.modelId = e.target.value; state.modelReady = false; });
+  $('#mic')?.addEventListener('click', toggleRec);
+  $('#polish-btn')?.addEventListener('click', startPolish);
+  $('#upload-btn')?.addEventListener('click', () => $('#file-input')?.click());
+  $('#file-input')?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; });
+
+  $('#copy-btn')?.addEventListener('click', () => {
+    const t = edText(); if (t) navigator.clipboard.writeText(t).then(() => toast('Copied!', 'success'));
+  });
+  $('#save-btn')?.addEventListener('click', () => {
+    const t = edText(); if (!t) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([t], { type: 'text/plain;charset=utf-8' }));
+    a.download = 'kannada-' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('Saved!', 'success');
+  });
+  $('#clear-btn')?.addEventListener('click', () => {
+    const ed = $('#editor');
+    if (ed && ed.textContent.trim() && !confirm('Clear?')) return;
+    if (ed) ed.innerHTML = '';
+    showPolishBtn(false);
+    lastSessionPCM = null;
+    saveDoc();
+  });
+
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
+      e.preventDefault(); if (['ready', 'recording'].includes(state.phase)) toggleRec();
+    }
+  });
+
+  const kn = $('#kn-toggle');
+  if (kn) { kn.addEventListener('click', () => {
+    state.kannadaMode = !state.kannadaMode;
+    kn.classList.toggle('is-active', state.kannadaMode);
+    kn.setAttribute('aria-pressed', state.kannadaMode);
+    toast(state.kannadaMode ? 'Kannada ON' : 'Kannada OFF', 'success');
+  }); }
+
+  initTranslit();
+  $('#editor')?.addEventListener('input', debounce(saveDoc, 800));
+}
+
+// ─── Persistence ───
+function edText() { return $('#editor')?.innerText?.trim() || ''; }
+function saveDoc() { try { localStorage.setItem('kn-ed', edText()); } catch {} }
+function loadDoc() { try { const s = localStorage.getItem('kn-ed'), e = $('#editor'); if (s && e) e.innerHTML = s.split('\n').map(esc).join('<br>'); } catch {} }
+
+// ─── Toast ───
+function toast(msg, type = 'info') {
+  const c = $('#toast-container'); if (!c) return;
+  const el = document.createElement('div'); el.className = 'toast toast--' + type; el.textContent = msg;
+  c.appendChild(el); requestAnimationFrame(() => el.classList.add('is-visible'));
+  setTimeout(() => { el.classList.remove('is-visible'); el.ontransitionend = () => el.remove(); }, 3000);
+}
+
+// ─── Transliteration ───
+function initTranslit() {
+  const ed = $('#editor'); if (!ed) return;
+  let buf = '';
+
+  function getBufSpan() { let s = ed.querySelector('.kn-buffer'); if (!s) { s = document.createElement('span'); s.className = 'kn-buffer'; s.contentEditable = 'false'; } return s; }
+  function rmBuf() { const s = ed.querySelector('.kn-buffer'); if (s) s.remove(); }
+
+  function insertText(txt) {
+    rmBuf();
+    const sel = window.getSelection();
+    if (!sel.rangeCount) { ed.appendChild(document.createTextNode(txt)); return; }
+    const r = sel.getRangeAt(0); r.deleteContents();
+    const n = document.createTextNode(txt); r.insertNode(n);
+    r.setStartAfter(n); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+  }
+
+  function showBuf() {
+    const s = getBufSpan(); s.textContent = buf;
+    if (!s.parentNode) {
+      const sel = window.getSelection();
+      if (sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(s); r.setStartAfter(s); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); }
+      else ed.appendChild(s);
+    }
+  }
+
+  function flush(sep) { if (!buf) return; const c = transliterate(buf); buf = ''; insertText(c + (sep || '')); }
+
+  ed.addEventListener('keydown', e => {
+    if (!state.kannadaMode || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === ' ' || e.key === 'Enter') { if (buf) { e.preventDefault(); flush(e.key === 'Enter' ? '\n' : ' '); } return; }
+    if (e.key === 'Backspace') { if (buf) { e.preventDefault(); buf = buf.slice(0, -1); buf ? showBuf() : rmBuf(); } return; }
+    if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) { e.preventDefault(); buf += e.key; showBuf(); return; }
+    if (e.key.length === 1 && buf) flush('');
+  });
+
+  ed.addEventListener('mousedown', () => { if (buf) flush(''); });
+  ed.addEventListener('blur', () => { if (buf) flush(''); });
+
+  ed.addEventListener('paste', e => {
+    if (!state.kannadaMode) return;
+    const plain = (e.clipboardData || window.clipboardData).getData('text');
+    if (!plain) return;
+    e.preventDefault();
+    if (buf) flush('');
+    const converted = plain.replace(/[a-zA-Z]+/g, match => transliterate(match));
+    insertText(converted);
+  });
+}
+
+// ─── Util ───
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
