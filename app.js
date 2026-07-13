@@ -229,12 +229,14 @@ async function startRec() {
     audioSrc.connect(scriptProc);
     scriptProc.connect(audioCtx.destination);
 
-    // Mark where this session's text starts in the editor
+    // Mark where this session's recorded text starts
     const ed = $('#editor');
     if (ed) {
+      // Remove any stale marks from a previous session
+      ed.querySelectorAll('.session-start, .session-end').forEach(m => m.remove());
+
       sessionStartMark = document.createElement('span');
-      sessionStartMark.className = 'session-mark';
-      sessionStartMark.id = 'session-mark';
+      sessionStartMark.className = 'session-mark session-start';
       ed.appendChild(sessionStartMark);
     }
 
@@ -266,6 +268,14 @@ function stopRec() {
   // Commit interim text
   removeInterim();
 
+  // Place end mark after the recorded text
+  const ed = $('#editor');
+  if (ed) {
+    const endMark = document.createElement('span');
+    endMark.className = 'session-mark session-end';
+    ed.appendChild(endMark);
+  }
+
   // Whisper fallback: flush remaining audio
   if (!recognition) {
     flushChunk(true);
@@ -279,8 +289,11 @@ function stopRec() {
     for (const c of pcmChunks) { lastSessionPCM.set(c, off); off += c.length; }
     pcmChunks = [];
 
-    // Show polish button
     showPolishBtn(true);
+  } else {
+    // No audio captured — hide polish, remove marks
+    showPolishBtn(false);
+    ed?.querySelectorAll('.session-start, .session-end').forEach(m => m.remove());
   }
 
   state.isRecording = false;
@@ -362,15 +375,19 @@ function doPolish() {
   if (btn) { btn.textContent = 'Polishing…'; }
   lockEditor();
 
-  // Remove session text from the editor (everything after the session mark)
+  // Remove only the recorded text (between session-start and session-end marks)
   const ed = $('#editor');
-  const mark = ed?.querySelector('#session-mark');
-  if (mark) {
-    // Remove everything after the mark
-    while (mark.nextSibling) {
-      mark.nextSibling.remove();
+  const startMark = ed?.querySelector('.session-start');
+  const endMark = ed?.querySelector('.session-end');
+
+  if (startMark && endMark) {
+    // Remove everything between start and end marks
+    let node = startMark.nextSibling;
+    while (node && node !== endMark) {
+      const next = node.nextSibling;
+      node.remove();
+      node = next;
     }
-    mark.remove();
   }
 
   // Send audio to Whisper in chunks
@@ -399,17 +416,28 @@ function onWhisperChunk(text, isFinal) {
   const t = (text || '').trim();
 
   if (t) {
-    if (ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
+    // Insert polished text before the end mark (or at end if no mark)
+    const endMark = ed.querySelector('.session-end');
     const span = document.createElement('span');
     span.className = 'polished';
     span.textContent = t;
-    ed.appendChild(span);
+
+    if (endMark) {
+      endMark.parentNode.insertBefore(document.createTextNode(' '), endMark);
+      endMark.parentNode.insertBefore(span, endMark);
+    } else {
+      if (ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
+      ed.appendChild(span);
+    }
+
     setTimeout(() => span.classList.add('settled'), 1200);
     ed.scrollTop = ed.scrollHeight;
   }
 
   if (isFinal) {
     ed.querySelectorAll('.polished').forEach(s => s.replaceWith(document.createTextNode(s.textContent)));
+    // Clean up marks
+    ed.querySelectorAll('.session-start, .session-end').forEach(m => m.remove());
     const btn = $('#polish-btn');
     if (btn) { btn.textContent = 'Polish'; btn.hidden = true; }
     unlockEditor();
