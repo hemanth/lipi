@@ -50,6 +50,9 @@ async function transcribeChunk(audioData, chunkId, isFinal) {
       opts.task = 'transcribe';
     }
 
+    // Condition the decoder to output clean Kannada text
+    opts.initial_prompt = 'ಕನ್ನಡ ಭಾಷೆಯಲ್ಲಿ ಸ್ಪಷ್ಟವಾಗಿ ಬರೆಯಿರಿ. ಸರಿಯಾದ ವಿರಾಮ ಚಿಹ್ನೆಗಳನ್ನು ಬಳಸಿ.';
+
     const result = await transcriber(audioData, opts);
     const text = (result.text || '').trim();
 
