@@ -521,15 +521,57 @@ function initTranslit() {
 
   function flush(sep) { if (!buf) return; const c = transliterate(buf); buf = ''; insertText(c + (sep || '')); }
 
+  // Desktop: keydown handles physical keyboards
   ed.addEventListener('keydown', e => {
     if (!state.kannadaMode || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Skip if key is Unidentified (mobile virtual keyboard)
+    if (e.key === 'Unidentified' || e.key === 'Process') return;
     if (e.key === ' ' || e.key === 'Enter') { if (buf) { e.preventDefault(); flush(e.key === 'Enter' ? '\n' : ' '); } return; }
     if (e.key === 'Backspace') { if (buf) { e.preventDefault(); buf = buf.slice(0, -1); buf ? showBuf() : rmBuf(); } return; }
     if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) { e.preventDefault(); buf += e.key; showBuf(); return; }
     if (e.key.length === 1 && buf) flush('');
   });
 
+  // Mobile: beforeinput handles virtual keyboards
+  // On desktop, keydown fires first and preventDefault() stops beforeinput from firing.
+  // On mobile, keydown fires with key="Unidentified" so it falls through here.
+  ed.addEventListener('beforeinput', e => {
+    if (!state.kannadaMode) return;
+
+    if (e.inputType === 'insertText' && e.data) {
+      // Latin letter → buffer it
+      if (/^[a-zA-Z]$/.test(e.data)) {
+        e.preventDefault();
+        buf += e.data;
+        showBuf();
+        return;
+      }
+      // Space → flush buffer
+      if (e.data === ' ' && buf) {
+        e.preventDefault();
+        flush(' ');
+        return;
+      }
+      // Any other character while buffer is active → flush first
+      if (buf) flush('');
+    }
+
+    if (e.inputType === 'insertParagraph' && buf) {
+      e.preventDefault();
+      flush('\n');
+      return;
+    }
+
+    if (e.inputType === 'deleteContentBackward' && buf) {
+      e.preventDefault();
+      buf = buf.slice(0, -1);
+      buf ? showBuf() : rmBuf();
+      return;
+    }
+  });
+
   ed.addEventListener('mousedown', () => { if (buf) flush(''); });
+  ed.addEventListener('touchend', () => { if (buf) flush(''); });
   ed.addEventListener('blur', () => { if (buf) flush(''); });
 
   ed.addEventListener('paste', e => {
