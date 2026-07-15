@@ -111,7 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
 function openEditor() {
   $('#landing').hidden = true;
   $('#editor-view').hidden = false;
-  $('#editor')?.focus();
+  // Don't auto-focus on mobile — avoids keyboard popping up on entry
+  const isMobile = window.matchMedia('(max-width: 600px)').matches || 'ontouchstart' in window;
+  if (!isMobile) $('#editor')?.focus();
   history.replaceState(null, '', '#editor');
 
   // Preload Whisper model in the background

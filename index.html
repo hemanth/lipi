@@ -2,7 +2,7 @@
 <html lang="kn">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>ಲಿಪಿ — Kannada Voice Editor</title>
   <meta name="description" content="Speak Kannada and watch text stream in real time. Type phonetically to write Kannada. Edit, copy, save.">
   <meta name="theme-color" content="#111116">
@@ -54,7 +54,7 @@
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
 
   <link rel="stylesheet" href="index.css?v=2">
-  <script>if(location.hash==='#editor')document.documentElement.classList.add('direct-editor')</script>
+  <script>if(location.hash==='#editor'){document.documentElement.classList.add('direct-editor'); const isMobile = window.matchMedia('(max-width: 600px)').matches || 'ontouchstart' in window; if (!isMobile) setTimeout(() => document.getElementById('editor')?.focus(), 500);}</script>
   <style>.direct-editor #landing{display:none}.direct-editor #editor-view{display:flex!important}</style>
 </head>
 <body>
