@@ -12,8 +12,6 @@ import { transliterate } from './transliterate.js';
 const MODELS = [
   { id: 'astronova001/whisper-small-kannada-ONNX', name: 'Whisper Small · Kannada', size: '~244 MB' },
   { id: 'astronova001/whisper-kannada-tiny-ONNX',  name: 'Whisper Tiny · Kannada',  size: '~75 MB'  },
-  { id: 'onnx-community/whisper-small',            name: 'Whisper Small · Multi',   size: '~244 MB' },
-  { id: 'onnx-community/whisper-tiny',             name: 'Whisper Tiny · Multi',    size: '~75 MB'  },
 ];
 
 const CHUNK_SEC = 10;
