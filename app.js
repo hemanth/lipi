@@ -17,6 +17,67 @@ const MODELS = [
 const CHUNK_SEC = 10;
 const SR = 16000;
 
+// ─── Voice Commands ───
+const DEFAULT_COMMANDS = [
+  { trigger: 'next line',         output: '\n',  builtin: true },
+  { trigger: 'new line',          output: '\n',  builtin: true },
+  { trigger: 'new paragraph',     output: '\n\n', builtin: true },
+  { trigger: 'full stop',         output: '.',   builtin: true },
+  { trigger: 'period',            output: '.',   builtin: true },
+  { trigger: 'comma',             output: ',',   builtin: true },
+  { trigger: 'question mark',     output: '?',   builtin: true },
+  { trigger: 'exclamation mark',  output: '!',   builtin: true },
+  { trigger: 'open bracket',      output: '(',   builtin: true },
+  { trigger: 'close bracket',     output: ')',   builtin: true },
+  { trigger: 'colon',             output: ':',   builtin: true },
+  { trigger: 'semicolon',         output: ';',   builtin: true },
+];
+
+function loadCommands() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lipi-commands') || '[]');
+    return [...DEFAULT_COMMANDS, ...saved];
+  } catch { return [...DEFAULT_COMMANDS]; }
+}
+
+function saveCustomCommands(cmds) {
+  const custom = cmds.filter(c => !c.builtin);
+  try { localStorage.setItem('lipi-commands', JSON.stringify(custom)); } catch {}
+}
+
+let voiceCommands = loadCommands();
+
+function processVoiceCommands(text) {
+  // Sort by trigger length (longest first) to match greedy
+  const sorted = [...voiceCommands].sort((a, b) => b.trigger.length - a.trigger.length);
+  let result = text;
+  for (const cmd of sorted) {
+    const re = new RegExp(cmd.trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    result = result.replace(re, cmd.output);
+  }
+  return result;
+}
+
+// ─── Pause detection ───
+let pauseEnabled = false;
+let pauseThreshold = 1.5; // seconds
+let lastFinalTime = 0;
+let pauseTimer = null;
+
+function loadPauseSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('lipi-pause') || '{}');
+    pauseEnabled = s.enabled || false;
+    pauseThreshold = s.threshold || 1.5;
+  } catch {}
+}
+
+function savePauseSettings() {
+  try { localStorage.setItem('lipi-pause', JSON.stringify({ enabled: pauseEnabled, threshold: pauseThreshold })); } catch {}
+}
+
+loadPauseSettings();
+
 const state = {
   phase: 'idle',
   modelId: MODELS[0].id,
@@ -119,12 +180,33 @@ async function initSpeech() {
     // Commit final text
     if (final) {
       removeInterim();
-      const trimmed = final.trim();
-      if (trimmed) {
-        if (ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
-        ed.appendChild(document.createTextNode(trimmed));
+      // Process voice commands before inserting
+      const processed = processVoiceCommands(final.trim());
+      if (processed) {
+        // Handle newlines: split by \n and insert <br> nodes
+        const parts = processed.split('\n');
+        parts.forEach((part, i) => {
+          if (i > 0) ed.appendChild(document.createElement('br'));
+          if (part) {
+            if (i === 0 && ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
+            ed.appendChild(document.createTextNode(part));
+          }
+        });
         ed.scrollTop = ed.scrollHeight;
         saveDoc();
+      }
+
+      // Reset pause timer
+      lastFinalTime = Date.now();
+      clearTimeout(pauseTimer);
+      if (pauseEnabled && state.isRecording) {
+        pauseTimer = setTimeout(() => {
+          if (state.isRecording && ed.textContent.trim()) {
+            ed.appendChild(document.createElement('br'));
+            ed.scrollTop = ed.scrollHeight;
+            saveDoc();
+          }
+        }, pauseThreshold * 1000);
       }
     }
 
@@ -597,6 +679,9 @@ function bind() {
     if ((e.metaKey || e.ctrlKey) && e.key === 'm') {
       e.preventDefault(); if (['ready', 'recording'].includes(state.phase)) toggleRec();
     }
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      e.preventDefault(); toggleHelp();
+    }
   });
 
   const kn = $('#kn-toggle');
@@ -606,6 +691,68 @@ function bind() {
     kn.setAttribute('aria-pressed', state.kannadaMode);
     toast(state.kannadaMode ? 'Kannada ON' : 'Kannada OFF', 'success');
   }); }
+
+  // Help overlay
+  $('#help-btn')?.addEventListener('click', toggleHelp);
+  $('#help-close')?.addEventListener('click', toggleHelp);
+  $('#help-overlay')?.addEventListener('click', e => { if (e.target.id === 'help-overlay') toggleHelp(); });
+
+  // Custom command form
+  $('#cmd-form')?.addEventListener('submit', e => {
+    e.preventDefault();
+    const trigger = $('#cmd-trigger')?.value?.trim().toLowerCase();
+    const output = $('#cmd-output')?.value?.trim();
+    if (!trigger || !output) return;
+    voiceCommands.push({ trigger, output });
+    saveCustomCommands(voiceCommands);
+    renderCommandTable();
+    $('#cmd-trigger').value = '';
+    $('#cmd-output').value = '';
+    toast('Command added', 'success');
+  });
+
+  // Reset commands
+  $('#cmd-reset')?.addEventListener('click', () => {
+    voiceCommands = [...DEFAULT_COMMANDS];
+    saveCustomCommands(voiceCommands);
+    renderCommandTable();
+    toast('Reset to defaults', 'success');
+  });
+
+  // Pause settings
+  const pauseToggle = $('#pause-toggle');
+  const pauseSlider = $('#pause-threshold');
+  const pauseVal = $('#pause-val');
+  const pauseWrap = $('#pause-slider-wrap');
+  if (pauseToggle) {
+    pauseToggle.checked = pauseEnabled;
+    if (pauseWrap) pauseWrap.hidden = !pauseEnabled;
+    pauseToggle.addEventListener('change', () => {
+      pauseEnabled = pauseToggle.checked;
+      if (pauseWrap) pauseWrap.hidden = !pauseEnabled;
+      savePauseSettings();
+    });
+  }
+  if (pauseSlider) {
+    pauseSlider.value = pauseThreshold;
+    if (pauseVal) pauseVal.textContent = pauseThreshold;
+    pauseSlider.addEventListener('input', () => {
+      pauseThreshold = parseFloat(pauseSlider.value);
+      if (pauseVal) pauseVal.textContent = pauseThreshold;
+      savePauseSettings();
+    });
+  }
+
+  // Mobile keyboard fix: keep toolbar above virtual keyboard
+  if (window.visualViewport) {
+    const bar = $('#float-bar');
+    const ed = $('#editor');
+    window.visualViewport.addEventListener('resize', () => {
+      const kbHeight = window.innerHeight - window.visualViewport.height;
+      if (bar) bar.style.bottom = kbHeight > 50 ? `${kbHeight + 8}px` : '';
+      if (ed) ed.style.paddingBottom = kbHeight > 50 ? `${kbHeight + 60}px` : '';
+    });
+  }
 
   initTranslit();
   $('#editor')?.addEventListener('input', debounce(saveDoc, 800));
@@ -713,6 +860,34 @@ function initTranslit() {
     if (buf) flush('');
     const converted = plain.replace(/[a-zA-Z]+/g, match => transliterate(match));
     insertText(converted);
+  });
+}
+
+// ─── Help overlay ───
+function toggleHelp() {
+  const overlay = $('#help-overlay');
+  if (!overlay) return;
+  const isOpen = !overlay.hidden;
+  overlay.hidden = isOpen;
+  if (!isOpen) renderCommandTable();
+}
+
+function renderCommandTable() {
+  const tbody = $('#cmd-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  voiceCommands.forEach((cmd, i) => {
+    const tr = document.createElement('tr');
+    const displayOutput = cmd.output.replace(/\n/g, '\\n');
+    const label = cmd.builtin ? '<span class="cmd-default">default</span>' : '';
+    tr.innerHTML = `<td>${esc(cmd.trigger)}${label}</td><td><code>${esc(displayOutput)}</code></td><td>${cmd.builtin ? '' : '<button class="cmd-del" title="Remove">✕</button>'}</td>`;
+    const delBtn = tr.querySelector('.cmd-del');
+    if (delBtn) delBtn.addEventListener('click', () => {
+      voiceCommands.splice(i, 1);
+      saveCustomCommands(voiceCommands);
+      renderCommandTable();
+    });
+    tbody.appendChild(tr);
   });
 }
 

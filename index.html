@@ -174,6 +174,64 @@
       <span class="sep" role="separator"></span>
 
       <select class="model-sel" id="model-select" aria-label="Whisper model"></select>
+
+      <span class="sep" role="separator"></span>
+
+      <button class="fbtn" id="help-btn" title="Voice commands & shortcuts" aria-label="Help">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+      </button>
+    </div>
+
+    <!-- Help overlay -->
+    <div class="help-overlay" id="help-overlay" hidden>
+      <div class="help-panel">
+        <div class="help-header">
+          <h2 class="help-title">Commands & Shortcuts</h2>
+          <button class="help-close" id="help-close" aria-label="Close help">&times;</button>
+        </div>
+
+        <div class="help-section">
+          <h3>Voice Commands</h3>
+          <p class="help-hint">Say these while recording to control formatting</p>
+          <table class="cmd-table" id="cmd-table">
+            <thead><tr><th>You say</th><th>It types</th><th></th></tr></thead>
+            <tbody id="cmd-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="help-section">
+          <h3>Add Custom Command</h3>
+          <form class="cmd-form" id="cmd-form">
+            <input type="text" id="cmd-trigger" placeholder="Trigger phrase" required aria-label="Trigger phrase">
+            <input type="text" id="cmd-output" placeholder="Output text" required aria-label="Output text">
+            <button type="submit" class="cmd-add-btn">Add</button>
+          </form>
+        </div>
+
+        <div class="help-section">
+          <h3>Pause Detection</h3>
+          <label class="help-toggle">
+            <input type="checkbox" id="pause-toggle">
+            <span>Auto-insert new line on pause</span>
+          </label>
+          <div class="pause-slider-wrap" id="pause-slider-wrap">
+            <label>Threshold: <span id="pause-val">1.5</span>s</label>
+            <input type="range" id="pause-threshold" min="0.8" max="3" step="0.1" value="1.5">
+          </div>
+        </div>
+
+        <div class="help-section">
+          <h3>Keyboard Shortcuts</h3>
+          <table class="cmd-table">
+            <tbody>
+              <tr><td><kbd>Cmd/Ctrl</kbd> + <kbd>M</kbd></td><td>Toggle recording</td><td></td></tr>
+              <tr><td><kbd>Cmd/Ctrl</kbd> + <kbd>/</kbd></td><td>Open this help</td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <button class="cmd-reset-btn" id="cmd-reset">Reset to defaults</button>
+      </div>
     </div>
 
     <div class="progress" id="progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100">
