@@ -8,6 +8,25 @@
  */
 
 import { transliterate } from './transliterate.js';
+import {
+  LANGUAGES,
+  DEFAULT_LANGUAGE_ID,
+  getLanguage,
+  isValidLanguage,
+  getAllLanguages,
+} from './languages.js';
+import {
+  translateText,
+  preloadLanguageModel,
+  onModelProgress,
+  getWorker,
+} from './translator.js';
+
+const STORAGE_KEYS = {
+  CONTENT: 'lipi-editor-content',
+  LANGUAGE: 'lipi-selected-lang',
+  LEGACY_CONTENT: 'kn-ed',
+};
 
 const MODELS = [
   { id: 'astronova001/whisper-small-kannada-ONNX', name: 'Whisper Small · Kannada', size: '~244 MB' },
@@ -84,6 +103,8 @@ const state = {
   modelReady: false,
   isRecording: false,
   kannadaMode: true,
+  currentLanguage: DEFAULT_LANGUAGE_ID, // 'kn'
+  voiceTranslateMode: false,
 };
 
 let worker, audioCtx, mediaStream, scriptProc, audioSrc;
@@ -92,15 +113,18 @@ let interimSpan = null;
 let pcmChunks = [];          // raw audio saved for polish
 let lastSessionPCM = null;   // merged PCM from last recording session
 let sessionStartMark = null; // DOM marker for where this session's text begins
+let clearTranslitBuffer = () => {};
+let flushTranslitBuffer = () => {};
 
 const $ = s => document.querySelector(s);
 
 // ─── Boot ───
 document.addEventListener('DOMContentLoaded', () => {
   populateModels();
+  populateLanguages();
   initWorker();
   bind();
-  loadDoc();
+  loadStoredState();
   setPhase('ready');
 
   // Check hash for direct link to editor
@@ -133,7 +157,7 @@ function closeEditor() {
 }
 
 // ═══════════════════════════════════
-//  Web Speech API — real-time streaming
+//  Web Speech API — real-time streaming & translation
 // ═══════════════════════════════════
 async function initSpeech() {
   const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -142,8 +166,9 @@ async function initSpeech() {
     return false;
   }
 
+  const langConfig = getLanguage(state.currentLanguage);
   recognition = new SpeechAPI();
-  recognition.lang = 'kn-IN';
+  recognition.lang = state.voiceTranslateMode ? 'en-IN' : langConfig.speechLocale;
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
@@ -151,79 +176,25 @@ async function initSpeech() {
   // Try on-device recognition if supported (no cloud, works offline)
   if ('processLocally' in recognition) {
     try {
-      const availability = await SpeechAPI.available({ langs: ['kn-IN'], processLocally: true });
+      const locale = recognition.lang;
+      const availability = await SpeechAPI.available({ langs: [locale], processLocally: true });
       if (availability === 'available') {
         recognition.processLocally = true;
-        console.log('[Lipi] On-device Kannada recognition available');
+        console.log(`[Lipi] On-device ${langConfig.name} recognition available`);
       } else if (availability === 'downloadable') {
-        toast('Downloading on-device Kannada model…', 'info');
-        await SpeechAPI.install({ langs: ['kn-IN'], processLocally: true });
+        toast(`Downloading on-device ${langConfig.name} model…`, 'info');
+        await SpeechAPI.install({ langs: [locale], processLocally: true });
         recognition.processLocally = true;
-        console.log('[Lipi] On-device Kannada model installed');
+        console.log(`[Lipi] On-device ${langConfig.name} model installed`);
       } else {
-        console.log('[Lipi] On-device not available for Kannada, using cloud');
+        console.log(`[Lipi] On-device not available for ${langConfig.name}, using cloud`);
       }
     } catch (e) {
       console.log('[Lipi] On-device check failed, using cloud:', e.message);
     }
   }
 
-  recognition.onresult = (event) => {
-    const ed = $('#editor');
-    if (!ed) return;
-
-    let interim = '', final = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += t;
-      else interim += t;
-    }
-
-    // Commit final text
-    if (final) {
-      removeInterim();
-      // Process voice commands before inserting
-      const processed = processVoiceCommands(final.trim());
-      if (processed) {
-        // Handle newlines: split by \n and insert <br> nodes
-        const parts = processed.split('\n');
-        parts.forEach((part, i) => {
-          if (i > 0) ed.appendChild(document.createElement('br'));
-          if (part) {
-            if (i === 0 && ed.textContent.trim()) ed.appendChild(document.createTextNode(' '));
-            ed.appendChild(document.createTextNode(part));
-          }
-        });
-        ed.scrollTop = ed.scrollHeight;
-        saveDoc();
-      }
-
-      // Reset pause timer
-      lastFinalTime = Date.now();
-      clearTimeout(pauseTimer);
-      if (pauseEnabled && state.isRecording) {
-        pauseTimer = setTimeout(() => {
-          if (state.isRecording && ed.textContent.trim()) {
-            ed.appendChild(document.createElement('br'));
-            ed.scrollTop = ed.scrollHeight;
-            saveDoc();
-          }
-        }, pauseThreshold * 1000);
-      }
-    }
-
-    // Show interim (partial, still changing)
-    if (interim) {
-      if (!interimSpan) {
-        interimSpan = document.createElement('span');
-        interimSpan.className = 'interim';
-        if (ed.textContent.trim() && !final) ed.appendChild(document.createTextNode(' '));
-        ed.appendChild(interimSpan);
-      }
-      interimSpan.textContent = interim;
-      ed.scrollTop = ed.scrollHeight;
-    }
-  };
+  recognition.onresult = handleSpeechResult;
 
   recognition.onerror = (event) => {
     if (event.error === 'no-speech' || event.error === 'aborted') return;
@@ -239,6 +210,109 @@ async function initSpeech() {
   return true;
 }
 
+function renderTextToFragment(text, hasLeadingSpace = false) {
+  const frag = document.createDocumentFragment();
+  const parts = text.split('\n');
+  parts.forEach((part, i) => {
+    if (i > 0) frag.appendChild(document.createElement('br'));
+    if (part) {
+      if (i === 0 && hasLeadingSpace) frag.appendChild(document.createTextNode(' '));
+      frag.appendChild(document.createTextNode(part));
+    }
+  });
+  return frag;
+}
+
+function handleSpeechResult(event) {
+  const ed = $('#editor');
+  if (!ed) return;
+
+  let interim = '', final = '';
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const t = event.results[i][0].transcript;
+    if (event.results[i].isFinal) final += t;
+    else interim += t;
+  }
+
+  // ─── Final Recognized Speech ───
+  if (final) {
+    removeInterim();
+    const processed = processVoiceCommands(final.trim());
+    if (processed) {
+      const needsLeadingSpace = ed.textContent.trim().length > 0;
+
+      // Case A: Voice Translation Mode (English -> Target Indic Language)
+      if (state.voiceTranslateMode) {
+        const pendingSpan = document.createElement('span');
+        pendingSpan.className = 'translating-chunk';
+        if (needsLeadingSpace) ed.appendChild(document.createTextNode(' '));
+        pendingSpan.textContent = processed;
+        ed.appendChild(pendingSpan);
+        ed.scrollTop = ed.scrollHeight;
+
+        const lbl = $('#mic-label');
+        if (lbl) lbl.textContent = 'Translating…';
+
+        const targetLang = state.currentLanguage;
+        translateText(processed, targetLang)
+          .then((translated) => {
+            if (pendingSpan.parentNode) {
+              const frag = renderTextToFragment(translated, false);
+              pendingSpan.parentNode.replaceChild(frag, pendingSpan);
+            }
+            if (state.isRecording && lbl) {
+              lbl.textContent = '● Streaming…';
+            } else if (lbl) {
+              lbl.textContent = '';
+            }
+            ed.scrollTop = ed.scrollHeight;
+            saveDoc();
+          })
+          .catch((err) => {
+            console.error('[Lipi] Voice translation error:', err);
+            if (pendingSpan.parentNode) {
+              pendingSpan.classList.remove('translating-chunk');
+            }
+            toast(`Translation error: ${err.message}`, 'error');
+            if (state.isRecording && lbl) lbl.textContent = '● Streaming…';
+          });
+
+      // Case B: Native Indic Speech Dictation
+      } else {
+        const frag = renderTextToFragment(processed, needsLeadingSpace);
+        ed.appendChild(frag);
+        ed.scrollTop = ed.scrollHeight;
+        saveDoc();
+      }
+    }
+
+    // Reset pause timer
+    lastFinalTime = Date.now();
+    clearTimeout(pauseTimer);
+    if (pauseEnabled && state.isRecording) {
+      pauseTimer = setTimeout(() => {
+        if (state.isRecording && ed.textContent.trim()) {
+          ed.appendChild(document.createElement('br'));
+          ed.scrollTop = ed.scrollHeight;
+          saveDoc();
+        }
+      }, pauseThreshold * 1000);
+    }
+  }
+
+  // ─── Interim Streaming Speech ───
+  if (interim) {
+    if (!interimSpan) {
+      interimSpan = document.createElement('span');
+      interimSpan.className = 'interim';
+      if (ed.textContent.trim() && !final) ed.appendChild(document.createTextNode(' '));
+      ed.appendChild(interimSpan);
+    }
+    interimSpan.textContent = interim;
+    ed.scrollTop = ed.scrollHeight;
+  }
+}
+
 function removeInterim() {
   if (interimSpan && interimSpan.parentNode) {
     interimSpan.remove();
@@ -247,29 +321,176 @@ function removeInterim() {
 }
 
 // ═══════════════════════════════════
-//  Whisper Worker — for polish + file upload
+//  Unified Worker — Whisper (polish/upload) + Paar (translation)
 // ═══════════════════════════════════
 function initWorker() {
-  worker = new Worker('./worker.js', { type: 'module' });
-  worker.onmessage = ({ data: m }) => {
+  worker = getWorker();
+  if (!worker) return;
+
+  worker.addEventListener('message', ({ data: m }) => {
     switch (m.type) {
-      case 'model-loading': showProg(0, 'Downloading Whisper…'); break;
+      case 'model-loading':
+        if (!m.language) showProg(0, 'Downloading Whisper…');
+        break;
       case 'model-progress':
-        if (m.status === 'progress' && m.total)
-          showProg(Math.round(m.loaded / m.total * 100), m.file);
+        if (!m.language && m.status === 'progress' && m.total) {
+          showProg(Math.round((m.loaded / m.total) * 100), m.file);
+        }
         break;
       case 'model-ready':
-        hideProg();
-        state.modelReady = true;
-        // If polish was waiting for model, trigger it now
-        if (state._polishPending) { state._polishPending = false; doPolish(); }
-        if (state._filePending) { state._filePending(); state._filePending = null; }
+        if (!m.language) {
+          hideProg();
+          state.modelReady = true;
+          if (state._polishPending) { state._polishPending = false; doPolish(); }
+          if (state._filePending) { state._filePending(); state._filePending = null; }
+        }
         break;
-      case 'model-error': hideProg(); toast('Model error: ' + m.error, 'error'); break;
-      case 'transcription-chunk': onWhisperChunk(m.text, m.isFinal); break;
-      case 'transcription-error': toast('Whisper error: ' + m.error, 'error'); setPhase('ready'); break;
+      case 'model-error':
+        if (!m.language) { hideProg(); toast('Model error: ' + m.error, 'error'); }
+        break;
+      case 'transcription-chunk':
+        onWhisperChunk(m.text, m.isFinal);
+        break;
+      case 'transcription-error':
+        toast('Whisper error: ' + m.error, 'error');
+        setPhase('ready');
+        break;
     }
-  };
+  });
+
+  // Connect Paar model download progress to UI progress bar
+  onModelProgress((data) => {
+    if (!data.language || data.language === state.currentLanguage) {
+      const pct = typeof data.progress === 'number'
+        ? Math.round(data.progress)
+        : (data.total ? Math.round((data.loaded / data.total) * 100) : 0);
+      showProg(pct, `Loading Paar ${getLanguage(data.language || state.currentLanguage).name}…`);
+      if (pct >= 100) hideProg();
+    }
+  });
+}
+
+// ═══════════════════════════════════
+//  Language Selection & Switching
+// ═══════════════════════════════════
+export function populateLanguages() {
+  const sel = $('#lang-select');
+  if (!sel) return;
+  const allLangs = getAllLanguages();
+  sel.innerHTML = allLangs.map(lang =>
+    `<option value="${lang.id}"${lang.id === state.currentLanguage ? ' selected' : ''}>${lang.nativeName} (${lang.name})</option>`
+  ).join('');
+  sel.value = state.currentLanguage;
+}
+
+export function setLanguage(langId, notify = true) {
+  if (!isValidLanguage(langId)) {
+    langId = DEFAULT_LANGUAGE_ID;
+  }
+  const langConfig = getLanguage(langId);
+  const prevLang = state.currentLanguage;
+  state.currentLanguage = langConfig.id;
+
+  // 1. Sync dropdown UI
+  const sel = $('#lang-select');
+  if (sel && sel.value !== langConfig.id) {
+    sel.value = langConfig.id;
+  }
+
+  // 2. Update editor attributes & BiDi
+  const ed = $('#editor');
+  if (ed) {
+    ed.dir = langConfig.direction;
+    ed.setAttribute('dir', langConfig.direction);
+    ed.setAttribute('lang', langConfig.id);
+    ed.setAttribute('placeholder', langConfig.defaultPlaceholder);
+    ed.setAttribute('data-placeholder', langConfig.defaultPlaceholder);
+    ed.setAttribute('aria-label', `${langConfig.name} text editor`);
+    ed.classList.toggle('is-rtl', langConfig.direction === 'rtl');
+  }
+
+  // 3. Update speech recognition locale
+  if (recognition) {
+    const targetLocale = state.voiceTranslateMode ? 'en-IN' : langConfig.speechLocale;
+    if (recognition.lang !== targetLocale) {
+      if (state.isRecording) {
+        try { recognition.stop(); } catch (_) {}
+        recognition.lang = targetLocale;
+        try { recognition.start(); } catch (_) {}
+      } else {
+        recognition.lang = targetLocale;
+      }
+    }
+  }
+
+  // 4. Update Kannada toggle visibility & transliteration
+  const knToggle = $('#kn-toggle');
+  if (knToggle) {
+    if (langConfig.id === 'kn') {
+      knToggle.hidden = false;
+      state.kannadaMode = knToggle.classList.contains('is-active');
+      knToggle.setAttribute('aria-pressed', state.kannadaMode);
+    } else {
+      knToggle.hidden = true;
+      state.kannadaMode = false;
+      if (typeof flushTranslitBuffer === 'function') {
+        flushTranslitBuffer();
+      }
+    }
+  }
+
+  // 5. Hide Polish button for non-Kannada languages
+  const polishBtn = $('#polish-btn');
+  if (polishBtn && langConfig.id !== 'kn') {
+    polishBtn.hidden = true;
+  }
+
+  // 6. Preload Paar model in background
+  try {
+    preloadLanguageModel(langConfig.id).catch(err => {
+      console.warn(`[Lipi] Model preload failed for ${langConfig.id}:`, err);
+    });
+  } catch (err) {
+    console.warn(`[Lipi] Error calling preloadLanguageModel:`, err);
+  }
+
+  // 7. Persist preference
+  saveLanguagePreference(langConfig.id);
+
+  // 8. Toast feedback on user-initiated change
+  if (notify && prevLang !== langConfig.id) {
+    toast(`Language: ${langConfig.name} (${langConfig.nativeName})`, 'info');
+  }
+}
+
+export async function translateCurrentContent(targetLang = state.currentLanguage) {
+  const ed = $('#editor');
+  const text = edText();
+  if (!text) return '';
+
+  const langConfig = getLanguage(targetLang);
+  const lbl = $('#mic-label');
+  const prevLabel = lbl ? lbl.textContent : '';
+  if (lbl) lbl.textContent = 'Translating…';
+  if (ed) ed.classList.add('is-translating');
+
+  try {
+    const translated = await translateText(text, langConfig.id);
+    if (ed) {
+      ed.innerHTML = translated.split('\n').map(esc).join('<br>');
+      ed.dir = langConfig.direction;
+      ed.setAttribute('dir', langConfig.direction);
+    }
+    saveDoc();
+    toast(`Translated to ${langConfig.name}!`, 'success');
+    return translated;
+  } catch (err) {
+    toast(`Translation failed: ${err.message}`, 'error');
+    throw err;
+  } finally {
+    if (ed) ed.classList.remove('is-translating');
+    if (lbl) lbl.textContent = prevLabel;
+  }
 }
 
 function ensureModel(cb) {
@@ -651,30 +872,29 @@ function bind() {
   $('#hero-open-editor')?.addEventListener('click', openEditor);
   $('#back-btn')?.addEventListener('click', closeEditor);
 
+  // Language selector
+  $('#lang-select')?.addEventListener('change', e => {
+    setLanguage(e.target.value, true);
+  });
+
   $('#model-select')?.addEventListener('change', e => { state.modelId = e.target.value; state.modelReady = false; });
   $('#mic')?.addEventListener('click', toggleRec);
   $('#polish-btn')?.addEventListener('click', startPolish);
   $('#upload-btn')?.addEventListener('click', () => $('#file-input')?.click());
   $('#file-input')?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; });
 
-  $('#copy-btn')?.addEventListener('click', () => {
-    const t = edText(); if (t) navigator.clipboard.writeText(t).then(() => toast('Copied!', 'success'));
+  $('#copy-btn')?.addEventListener('click', async () => {
+    try {
+      await copyContent();
+    } catch (_) {}
   });
+
   $('#save-btn')?.addEventListener('click', () => {
-    const t = edText(); if (!t) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([t], { type: 'text/plain;charset=utf-8' }));
-    a.download = 'kannada-' + new Date().toISOString().slice(0, 10) + '.txt';
-    a.click(); URL.revokeObjectURL(a.href);
-    toast('Saved!', 'success');
+    saveFile();
   });
+
   $('#clear-btn')?.addEventListener('click', () => {
-    const ed = $('#editor');
-    if (ed && ed.textContent.trim() && !confirm('Clear?')) return;
-    if (ed) ed.innerHTML = '';
-    showPolishBtn(false);
-    lastSessionPCM = null;
-    saveDoc();
+    clearEditor();
   });
 
   document.addEventListener('keydown', e => {
@@ -758,12 +978,139 @@ function bind() {
 
   initTranslit();
   $('#editor')?.addEventListener('input', debounce(saveDoc, 800));
+  window.addEventListener('beforeunload', () => {
+    saveDoc();
+  });
 }
 
-// ─── Persistence ───
-function edText() { return $('#editor')?.innerText?.trim() || ''; }
-function saveDoc() { try { localStorage.setItem('kn-ed', edText()); } catch {} }
-function loadDoc() { try { const s = localStorage.getItem('kn-ed'), e = $('#editor'); if (s && e) e.innerHTML = s.split('\n').map(esc).join('<br>'); } catch {} }
+// ═══════════════════════════════════
+//  Editor Operations & Persistence
+// ═══════════════════════════════════
+
+export function edText() {
+  const ed = $('#editor');
+  if (!ed) return '';
+  const clone = ed.cloneNode(true);
+  clone.querySelectorAll('.interim, .kn-buffer, .session-mark, .translating-chunk').forEach(el => el.remove());
+  return (clone.innerText || clone.textContent || '').trim();
+}
+
+export function saveFile() {
+  const text = edText();
+  if (!text) {
+    toast('Editor is empty — nothing to save.', 'error');
+    return null;
+  }
+
+  const lang = getLanguage(state.currentLanguage);
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `${lang.name.toLowerCase()}-${dateStr}.txt`;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+  toast('Saved!', 'success');
+  return { filename, blob, content: text };
+}
+
+export async function copyContent() {
+  const text = edText();
+  if (!text) {
+    toast('Editor is empty.', 'info');
+    return '';
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied!', 'success');
+    return text;
+  } catch (err) {
+    console.warn('[Lipi] Clipboard write failed:', err);
+    toast('Failed to copy text', 'error');
+    throw err;
+  }
+}
+
+export function clearEditor() {
+  const ed = $('#editor');
+  if (ed && ed.textContent.trim() && !confirm('Clear?')) return;
+
+  if (state.isRecording) {
+    stopRec();
+  }
+
+  if (ed) {
+    ed.innerHTML = '';
+    ed.innerText = '';
+  }
+  showPolishBtn(false);
+  lastSessionPCM = null;
+  pcmChunks = [];
+  sessionStartMark = null;
+
+  if (typeof clearTranslitBuffer === 'function') {
+    clearTranslitBuffer();
+  }
+
+  saveDoc();
+  toast('Editor cleared', 'info');
+}
+
+export function saveDoc() {
+  const text = edText();
+  try {
+    localStorage.setItem(STORAGE_KEYS.CONTENT, text);
+    localStorage.setItem(STORAGE_KEYS.LEGACY_CONTENT, text);
+  } catch (err) {
+    console.warn('[Lipi] LocalStorage saveDoc failed:', err);
+  }
+}
+
+export function loadDoc() {
+  try {
+    let s = localStorage.getItem(STORAGE_KEYS.CONTENT);
+    if (s === null) {
+      s = localStorage.getItem(STORAGE_KEYS.LEGACY_CONTENT);
+    }
+    const ed = $('#editor');
+    if (s && ed) {
+      ed.innerHTML = s.split('\n').map(esc).join('<br>');
+    }
+  } catch (err) {
+    console.warn('[Lipi] LocalStorage loadDoc failed:', err);
+  }
+}
+
+export function saveLanguagePreference(langId) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.LANGUAGE, langId);
+  } catch (err) {
+    console.warn('[Lipi] LocalStorage saveLanguagePreference failed:', err);
+  }
+}
+
+export function loadLanguagePreference() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.LANGUAGE);
+    if (saved && isValidLanguage(saved)) {
+      return saved;
+    }
+  } catch (err) {
+    console.warn('[Lipi] LocalStorage loadLanguagePreference failed:', err);
+  }
+  return DEFAULT_LANGUAGE_ID;
+}
+
+export function loadStoredState() {
+  const savedLang = loadLanguagePreference();
+  setLanguage(savedLang, false);
+  loadDoc();
+}
 
 // ─── Toast ───
 function toast(msg, type = 'info') {
@@ -778,13 +1125,15 @@ function initTranslit() {
   const ed = $('#editor'); if (!ed) return;
   let buf = '';
 
+  const isTranslitActive = () => state.currentLanguage === 'kn' && state.kannadaMode;
+
   function getBufSpan() { let s = ed.querySelector('.kn-buffer'); if (!s) { s = document.createElement('span'); s.className = 'kn-buffer'; s.contentEditable = 'false'; } return s; }
   function rmBuf() { const s = ed.querySelector('.kn-buffer'); if (s) s.remove(); }
 
   function insertText(txt) {
     rmBuf();
     const sel = window.getSelection();
-    if (!sel.rangeCount) { ed.appendChild(document.createTextNode(txt)); return; }
+    if (!sel || !sel.rangeCount) { ed.appendChild(document.createTextNode(txt)); return; }
     const r = sel.getRangeAt(0); r.deleteContents();
     const n = document.createTextNode(txt); r.insertNode(n);
     r.setStartAfter(n); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
@@ -794,16 +1143,19 @@ function initTranslit() {
     const s = getBufSpan(); s.textContent = buf;
     if (!s.parentNode) {
       const sel = window.getSelection();
-      if (sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(s); r.setStartAfter(s); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); }
+      if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(s); r.setStartAfter(s); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); }
       else ed.appendChild(s);
     }
   }
 
   function flush(sep) { if (!buf) return; const c = transliterate(buf); buf = ''; insertText(c + (sep || '')); }
 
+  flushTranslitBuffer = () => { if (buf) flush(''); };
+  clearTranslitBuffer = () => { buf = ''; rmBuf(); };
+
   // Desktop: keydown handles physical keyboards
   ed.addEventListener('keydown', e => {
-    if (!state.kannadaMode || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!isTranslitActive() || e.ctrlKey || e.metaKey || e.altKey) return;
     // Skip if key is Unidentified (mobile virtual keyboard)
     if (e.key === 'Unidentified' || e.key === 'Process') return;
     if (e.key === ' ' || e.key === 'Enter') { if (buf) { e.preventDefault(); flush(e.key === 'Enter' ? '\n' : ' '); } return; }
@@ -813,10 +1165,8 @@ function initTranslit() {
   });
 
   // Mobile: beforeinput handles virtual keyboards
-  // On desktop, keydown fires first and preventDefault() stops beforeinput from firing.
-  // On mobile, keydown fires with key="Unidentified" so it falls through here.
   ed.addEventListener('beforeinput', e => {
-    if (!state.kannadaMode) return;
+    if (!isTranslitActive()) return;
 
     if (e.inputType === 'insertText' && e.data) {
       // Latin letter → buffer it
@@ -855,8 +1205,8 @@ function initTranslit() {
   ed.addEventListener('blur', () => { if (buf) flush(''); });
 
   ed.addEventListener('paste', e => {
-    if (!state.kannadaMode) return;
-    const plain = (e.clipboardData || window.clipboardData).getData('text');
+    if (!isTranslitActive()) return;
+    const plain = (e.clipboardData || window.clipboardData)?.getData('text');
     if (!plain) return;
     e.preventDefault();
     if (buf) flush('');

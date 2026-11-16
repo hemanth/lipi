@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
-  <title>ಲಿಪಿ — Kannada Voice Editor</title>
-  <meta name="description" content="Speak Kannada and watch text stream in real time. Type phonetically to write Kannada. Edit, copy, save.">
+  <title>ಲಿಪಿ — Indic Voice Editor</title>
+  <meta name="description" content="Real-time Indic voice and text editor supporting 12 languages: Hindi, Bengali, Marathi, Telugu, Tamil, Gujarati, Urdu, Kannada, Malayalam, Punjabi, Odia, and Assamese. Powered by Paar translation and Whisper AI.">
   <meta name="theme-color" content="#111116">
   <meta name="google" content="notranslate">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%231b1b22'/><text x='50' y='68' text-anchor='middle' font-size='52' font-family='sans-serif' fill='%23c8912e'>ಲಿ</text></svg>">
 
-  <meta property="og:title" content="ಲಿಪಿ — Kannada Voice Editor">
-  <meta property="og:description" content="Speak Kannada, stream text, edit, save. Powered by Whisper AI.">
+  <meta property="og:title" content="ಲಿಪಿ — Indic Voice Editor">
+  <meta property="og:description" content="Speak or type across 12 Indic languages with real-time streaming, Paar neural translation, and Whisper AI polish.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://h3manth.com/ai/lipi/og.jpg">
   <meta property="og:image:width" content="600">
@@ -28,30 +28,31 @@
     "@context": "https://schema.org",
     "@type": "WebApplication",
     "name": "ಲಿಪಿ (Lipi)",
-    "alternateName": "Lipi Kannada Voice Editor",
+    "alternateName": "Lipi Indic Voice Editor",
     "url": "https://h3manth.com/ai/lipi/",
-    "description": "Real-time Kannada speech-to-text editor. Speak Kannada and watch words stream live. Type English to get Kannada. Polish with Whisper AI.",
+    "description": "Real-time Indic voice editor and translation workspace supporting 12 Indic languages. Powered by Udgam Labs Paar translation models and Whisper AI.",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "Web",
     "browserRequirements": "Chrome 80+, Edge 80+",
-    "inLanguage": ["kn", "en"],
+    "inLanguage": ["kn", "hi", "bn", "mr", "te", "ta", "gu", "ur", "ml", "pa", "or", "as", "en"],
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "author": { "@type": "Person", "name": "Hemanth HM", "url": "https://h3manth.com" },
     "featureList": [
-      "Real-time Kannada speech streaming",
-      "Phonetic English-to-Kannada transliteration",
-      "Whisper AI polish for improved accuracy",
-      "Full text editor with auto-save",
-      "Audio file upload and transcription"
+      "12 Indic languages: Hindi, Bengali, Marathi, Telugu, Tamil, Gujarati, Urdu, Kannada, Malayalam, Punjabi, Odia, Assamese",
+      "Real-time Indic speech streaming via Web Speech API",
+      "Neural machine translation powered by Udgam Labs Paar models",
+      "BiDi and RTL layout support for Urdu",
+      "Full text editor with auto-save and text export",
+      "Whisper AI audio transcription and polish"
     ]
   }
   </script>
 
-  <!-- Non-render-blocking fonts -->
+  <!-- Non-render-blocking fonts for all 12 Indic scripts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Kannada:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&family=Noto+Sans+Gurmukhi:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Oriya:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&family=Noto+Sans+Gurmukhi:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Oriya:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
 
   <link rel="stylesheet" href="index.css?v=3">
   <script>if(location.hash==='#editor'){document.documentElement.classList.add('direct-editor'); const isMobile = window.matchMedia('(max-width: 600px)').matches || 'ontouchstart' in window; if (!isMobile) setTimeout(() => document.getElementById('editor')?.focus(), 500);}</script>
@@ -71,11 +72,11 @@
 
       <h1 class="hero-title">ಲಿಪಿ</h1>
 
-      <p class="hero-tagline">Kannada Voice Editor</p>
+      <p class="hero-tagline">Indic Voice Editor</p>
 
       <p class="hero-sub">
-        Speak Kannada and watch your words stream onto the page in real time.
-        Type in English and it converts to Kannada. Edit, copy, save.
+        Speak or type in English and translate into 12 Indic languages in real time.
+        Powered by Paar translation models. Edit, copy, save.
       </p>
 
       <div class="hero-cta-group">
@@ -97,14 +98,14 @@
         <p class="feature-desc">Words appear as you speak. No waiting.</p>
       </div>
       <div class="feature">
-        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        <h2 class="feature-title">Whisper Polish</h2>
-        <p class="feature-desc">One click to refine text with Whisper AI for better accuracy.</p>
+        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        <h2 class="feature-title">12 Indic Languages</h2>
+        <p class="feature-desc">Hindi, Bengali, Marathi, Telugu, Tamil, Gujarati, Urdu, Kannada, Malayalam, Punjabi, Odia, Assamese.</p>
       </div>
       <div class="feature">
-        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        <h2 class="feature-title">Phonetic Typing</h2>
-        <p class="feature-desc">Type "namaskara" → ನಮಸ್ಕಾರ. No keyboard switch needed.</p>
+        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <h2 class="feature-title">Paar Translation</h2>
+        <p class="feature-desc">Neural translation across Indic languages powered by Udgam Labs Paar models.</p>
       </div>
       <div class="feature">
         <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></svg>
@@ -122,8 +123,8 @@
           <span class="preview-dot"></span>
         </div>
         <div class="preview-body">
-          ನಮಸ್ಕಾರ, ಇದು ಕನ್ನಡ ಧ್ವನಿ ಸಂಪಾದಕ.
-          <span class="preview-accent">ನಿಮ್ಮ ಮಾತುಗಳನ್ನು ಪಠ್ಯವಾಗಿ ಪರಿವರ್ತಿಸಿ…</span>
+          ನಮಸ್ಕಾರ · नमस्ते · வணக்கம் · سلام
+          <span class="preview-accent">12 Indic languages · Voice & text editor…</span>
         </div>
         <div class="preview-rec-row">
           <span class="preview-rec-dot"></span>
@@ -133,7 +134,7 @@
     </section>
 
     <footer class="landing-footer">
-      <p>ಲಿಪಿ · Powered by Web Speech API + <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener">Transformers.js</a> Whisper</p>
+      <p>ಲಿಪಿ · Powered by <a href="https://udgamlabs.com/models/paar" target="_blank" rel="noopener">Paar Models</a> + Web Speech API + <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener">Transformers.js</a> Whisper</p>
     </footer>
   </section>
 
@@ -145,17 +146,36 @@
     </button>
 
     <div class="editor" id="editor" contenteditable="true" spellcheck="false"
-         role="textbox" aria-multiline="true" aria-label="Kannada text editor"></div>
+         role="textbox" aria-multiline="true" aria-label="Indic text editor"
+         dir="ltr"
+         placeholder="ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮಾತನಾಡಿ..."
+         data-placeholder="ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮಾತನಾಡಿ..."></div>
 
     <div class="float-bar" id="float-bar" role="toolbar" aria-label="Editor tools">
-      <button class="mic" id="mic" aria-label="Record">
+      <button class="mic" id="mic" aria-label="Record voice input" title="Record">
         <span class="mic-dot"></span>
       </button>
-      <span class="mic-label" id="mic-label"></span>
+      <span class="mic-label" id="mic-label" aria-live="polite"></span>
 
       <span class="sep" role="separator"></span>
 
       <button class="polish-btn" id="polish-btn" hidden title="Re-transcribe with Whisper for better accuracy">Polish</button>
+
+      <!-- Language Selector -->
+      <select class="lang-sel" id="lang-select" aria-label="Select Indic language" title="Select Indic language">
+        <option value="kn" selected>ಕನ್ನಡ (Kannada)</option>
+        <option value="hi">हिन्दी (Hindi)</option>
+        <option value="bn">বাংলা (Bengali)</option>
+        <option value="mr">मराठी (Marathi)</option>
+        <option value="te">తెలుగు (Telugu)</option>
+        <option value="ta">தமிழ் (Tamil)</option>
+        <option value="gu">ગુજરાતી (Gujarati)</option>
+        <option value="ur">اردو (Urdu)</option>
+        <option value="ml">മലയാളം (Malayalam)</option>
+        <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+        <option value="or">ଓଡ଼ିଆ (Odia)</option>
+        <option value="as">অসমীয়া (Assamese)</option>
+      </select>
 
       <button class="fbtn kn-toggle is-active" id="kn-toggle" aria-pressed="true" title="Kannada typing">ಕ</button>
       <button class="fbtn" id="upload-btn" title="Upload audio" aria-label="Upload audio file">
