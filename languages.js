@@ -14,6 +14,7 @@ export const LANGUAGES = Object.freeze({
     id: 'hi',
     name: 'Hindi',
     nativeName: 'हिन्दी',
+    lipiWord: 'लिपि',
     script: 'Devanagari',
     unicodeRegex: /[\u0900-\u097F]/,
     direction: 'ltr',
@@ -25,6 +26,7 @@ export const LANGUAGES = Object.freeze({
     id: 'bn',
     name: 'Bengali',
     nativeName: 'বাংলা',
+    lipiWord: 'লিপি',
     script: 'Bengali',
     unicodeRegex: /[\u0980-\u09FF]/,
     direction: 'ltr',
@@ -36,6 +38,7 @@ export const LANGUAGES = Object.freeze({
     id: 'mr',
     name: 'Marathi',
     nativeName: 'मराठी',
+    lipiWord: 'लिपी',
     script: 'Devanagari',
     unicodeRegex: /[\u0900-\u097F]/,
     direction: 'ltr',
@@ -47,6 +50,7 @@ export const LANGUAGES = Object.freeze({
     id: 'te',
     name: 'Telugu',
     nativeName: 'తెలుగు',
+    lipiWord: 'లిపి',
     script: 'Telugu',
     unicodeRegex: /[\u0C00-\u0C7F]/,
     direction: 'ltr',
@@ -58,6 +62,7 @@ export const LANGUAGES = Object.freeze({
     id: 'ta',
     name: 'Tamil',
     nativeName: 'தமிழ்',
+    lipiWord: 'லிபி',
     script: 'Tamil',
     unicodeRegex: /[\u0B80-\u0BFF]/,
     direction: 'ltr',
@@ -69,6 +74,7 @@ export const LANGUAGES = Object.freeze({
     id: 'gu',
     name: 'Gujarati',
     nativeName: 'ગુજરાતી',
+    lipiWord: 'લિપિ',
     script: 'Gujarati',
     unicodeRegex: /[\u0A80-\u0AFF]/,
     direction: 'ltr',
@@ -80,6 +86,7 @@ export const LANGUAGES = Object.freeze({
     id: 'ur',
     name: 'Urdu',
     nativeName: 'اردو',
+    lipiWord: 'لپی',
     script: 'Nastaliq',
     unicodeRegex: /[\u0600-\u06FF]/,
     direction: 'rtl',
@@ -91,6 +98,7 @@ export const LANGUAGES = Object.freeze({
     id: 'kn',
     name: 'Kannada',
     nativeName: 'ಕನ್ನಡ',
+    lipiWord: 'ಲಿಪಿ',
     script: 'Kannada',
     unicodeRegex: /[\u0C80-\u0CFF]/,
     direction: 'ltr',
@@ -102,6 +110,7 @@ export const LANGUAGES = Object.freeze({
     id: 'ml',
     name: 'Malayalam',
     nativeName: 'മലയാളം',
+    lipiWord: 'ലിപി',
     script: 'Malayalam',
     unicodeRegex: /[\u0D00-\u0D7F]/,
     direction: 'ltr',
@@ -113,6 +122,7 @@ export const LANGUAGES = Object.freeze({
     id: 'pa',
     name: 'Punjabi',
     nativeName: 'ਪੰਜਾਬੀ',
+    lipiWord: 'ਲਿਪੀ',
     script: 'Gurmukhi',
     unicodeRegex: /[\u0A00-\u0A7F]/,
     direction: 'ltr',
@@ -124,6 +134,7 @@ export const LANGUAGES = Object.freeze({
     id: 'or',
     name: 'Odia',
     nativeName: 'ଓଡ଼ିଆ',
+    lipiWord: 'ଲିପି',
     script: 'Odia',
     unicodeRegex: /[\u0B00-\u0B7F]/,
     direction: 'ltr',
@@ -135,6 +146,7 @@ export const LANGUAGES = Object.freeze({
     id: 'as',
     name: 'Assamese',
     nativeName: 'অসমীয়া',
+    lipiWord: 'লিপি',
     script: 'Assamese',
     unicodeRegex: /[\u0980-\u09FF]/,
     direction: 'ltr',
@@ -162,6 +174,7 @@ export function isValidLanguage(id) {
  * @returns {Object} LanguageConfig
  */
 export function getLanguage(id) {
+  if (id && typeof id !== 'string') return LANGUAGES[DEFAULT_LANGUAGE_ID];
   if (id && typeof id === 'string') {
     const key = id.toLowerCase().trim();
     if (Object.prototype.hasOwnProperty.call(LANGUAGES, key)) {
